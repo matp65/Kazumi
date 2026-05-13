@@ -101,7 +101,9 @@ class RecorderApi {
         return true;
       }
       if (data['status'] == -3) {
-        KazumiLogger().i('RecorderApi: recording already exists (status=-3), treating as success', forceLog: true);
+        // Already exists, but we don't know the collectType here.
+        // Just treat as success; status will be synced via full sync.
+        KazumiLogger().i('RecorderApi: already exists, treating as success', forceLog: true);
         return true;
       }
       KazumiLogger().w(
@@ -115,14 +117,22 @@ class RecorderApi {
     }
   }
 
-  Future<bool> updateProgress(int bangumiId, String recorder) async {
+  /// Sync collect status using update endpoint (with new user_status mapping)
+  Future<bool> syncCollectStatus(int bangumiId, int collectType) async {
+    if (!hasCredentials) return false;
+    final updateStatus = RecorderApi.collectTypeToUpdateStatus(collectType);
+    return updateRecording(bangumiId, userStatus: updateStatus);
+  }
+
+  Future<bool> updateRecording(int bangumiId, {int? userStatus, String? recorder}) async {
     if (!hasCredentials) return false;
     const path = '/api/v1/open/update';
-    final params = {
+    final params = <String, dynamic>{
       'token': _token,
       'bangumi_id': bangumiId,
-      'recorder': recorder,
     };
+    if (userStatus != null) params['user_status'] = userStatus;
+    if (recorder != null) params['recorder'] = recorder;
     try {
       _logRequest('POST', path, params);
       final response = await _dio.post(
@@ -136,6 +146,10 @@ class RecorderApi {
       _logError('POST', path, e);
       return false;
     }
+  }
+
+  Future<bool> updateProgress(int bangumiId, String recorder) async {
+    return updateRecording(bangumiId, recorder: recorder);
   }
 
   Future<List<RecorderItem>> listRecordings() async {
@@ -210,13 +224,36 @@ class RecorderApi {
     }
   }
 
+  static int collectTypeToUpdateStatus(int collectType) {
+    // update endpoint: 0=想看, 1=在看, 2=看过, 3=搁置, 4=抛弃
+    switch (collectType) {
+      case 1:
+        return 1;
+      case 2:
+        return 0;
+      case 3:
+        return 3;
+      case 4:
+        return 2;
+      case 5:
+        return 4;
+      default:
+        return 0;
+    }
+  }
+
   static int userStatusToCollectType(int userStatus) {
+    // New mapping: 0=想看, 1=在看, 2=看过, 3=搁置, 4=抛弃
     switch (userStatus) {
+      case 0:
+        return 2;
       case 1:
         return 1;
       case 2:
         return 4;
       case 3:
+        return 3;
+      case 4:
         return 5;
       default:
         return 2;
@@ -278,6 +315,7 @@ class RecorderGetResponse {
   final int? bangumiId;
   final String? recorder;
   final String? date;
+  final int? userStatus;
 
   RecorderGetResponse({
     required this.status,
@@ -285,6 +323,7 @@ class RecorderGetResponse {
     this.bangumiId,
     this.recorder,
     this.date,
+    this.userStatus,
   });
 
   factory RecorderGetResponse.fromJson(Map<String, dynamic> json) {
@@ -294,6 +333,7 @@ class RecorderGetResponse {
       bangumiId: json['bangumi_id'] as int?,
       recorder: json['recorder'] as String?,
       date: json['date'] as String?,
+      userStatus: json['user_status'] as int?,
     );
   }
 }
@@ -304,6 +344,7 @@ class RecorderItem {
   final String? bangumiId;
   final String? recorder;
   final String? date;
+  final int? userStatus;
 
   RecorderItem({
     required this.id,
@@ -311,6 +352,7 @@ class RecorderItem {
     this.bangumiId,
     this.recorder,
     this.date,
+    this.userStatus,
   });
 
   factory RecorderItem.fromJson(Map<String, dynamic> json) {
@@ -320,6 +362,7 @@ class RecorderItem {
       bangumiId: json['bangumi_id']?.toString(),
       recorder: json['recorder'] as String?,
       date: json['date'] as String?,
+      userStatus: json['user_status'] as int?,
     );
   }
 }
@@ -336,6 +379,7 @@ class DetailListItem {
   final String? recorder;
   final String? updatedAt;
   final String? createdAt;
+  final int? userStatus;
 
   DetailListItem({
     required this.id,
@@ -349,6 +393,7 @@ class DetailListItem {
     this.recorder,
     this.updatedAt,
     this.createdAt,
+    this.userStatus,
   });
 
   factory DetailListItem.fromJson(Map<String, dynamic> json) {
@@ -364,6 +409,7 @@ class DetailListItem {
       recorder: json['recorder'] as String?,
       updatedAt: json['updated_at'] as String?,
       createdAt: json['created_at'] as String?,
+      userStatus: json['user_status'] as int?,
     );
   }
 }

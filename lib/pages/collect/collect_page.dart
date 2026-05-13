@@ -149,11 +149,12 @@ class _CollectPageState extends State<CollectPage>
         // Local only → push to remote
         final userStatus = RecorderApi.collectTypeToUserStatus(local.type);
         await api.addRecording(local.bangumiItem.id, userStatus);
+        await api.syncCollectStatus(local.bangumiItem.id, local.type);
       } else if (local == null && remote != null) {
         // Remote only → pull to local (create minimal entry)
         if (remote.title != null && remote.title!.isNotEmpty) {
           final remoteType = RecorderApi.userStatusToCollectType(
-            _inferUserStatus(remote),
+            remote.userStatus ?? 0,
           );
           await collectController.addCollect(
             _buildMinimalBangumiItem(entry, remote),
@@ -171,10 +172,11 @@ class _CollectPageState extends State<CollectPage>
           // Remote has no valid timestamp → push local
           final userStatus = RecorderApi.collectTypeToUserStatus(local.type);
           await api.addRecording(local.bangumiItem.id, userStatus);
+          await api.syncCollectStatus(local.bangumiItem.id, local.type);
         } else if (remoteTime.isAfter(localTime)) {
           // Remote is newer → pull to local
           final remoteType = RecorderApi.userStatusToCollectType(
-            _inferUserStatus(remote),
+            remote.userStatus ?? 0,
           );
           if (local.type != remoteType) {
             local.type = remoteType;
@@ -185,21 +187,10 @@ class _CollectPageState extends State<CollectPage>
           // Local is newer or same → push to remote
           final userStatus = RecorderApi.collectTypeToUserStatus(local.type);
           await api.addRecording(local.bangumiItem.id, userStatus);
+          await api.syncCollectStatus(local.bangumiItem.id, local.type);
         }
       }
     }
-  }
-
-  int _inferUserStatus(DetailListItem item) {
-    // The detail_list API doesn't directly return user_status.
-    // We infer from recorder progress: if recorder is set, likely 'recording'.
-    // If it has a title but no progress, check what addRecording set.
-    // Since the recorder field stores progress, presence indicates watching.
-    // Default to pending (0).
-    if (item.recorder != null && item.recorder!.isNotEmpty) {
-      return 1; // recording
-    }
-    return 0; // pending
   }
 
   BangumiItem _buildMinimalBangumiItem(int id, DetailListItem item) {
