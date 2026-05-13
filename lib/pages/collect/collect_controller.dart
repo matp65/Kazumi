@@ -6,6 +6,7 @@ import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:kazumi/modules/collect/collect_module.dart';
 import 'package:kazumi/modules/collect/collect_type.dart';
 import 'package:kazumi/utils/bangumi_sync_service.dart';
+import 'package:kazumi/utils/recorder_sync_service.dart';
 import 'package:kazumi/utils/storage.dart';
 import 'package:kazumi/utils/webdav.dart';
 import 'package:kazumi/repositories/collect_crud_repository.dart';
@@ -73,6 +74,9 @@ abstract class _CollectController with Store {
       type: type,
     );
     loadCollectibles();
+
+    // 3. Fire-and-forget sync to Recorder server
+    _syncRecorderIfEnabled(bangumiItem.id, type);
   }
 
   @action
@@ -213,6 +217,26 @@ abstract class _CollectController with Store {
       );
       return false;
     }
+  }
+
+  void _syncRecorderIfEnabled(int bangumiId, int localType) {
+    final bool syncEnable =
+        setting.get(SettingBoxKey.recorderSyncEnable, defaultValue: false);
+    if (!syncEnable) return;
+
+    final recorder = RecorderSyncService();
+    if (!recorder.initialized) {
+      try {
+        recorder.init().then((_) {
+          recorder.syncCollectibleWhenIdle(bangumiId, localType);
+        }).catchError((_) {});
+        return;
+      } catch (_) {
+        return;
+      }
+    }
+
+    recorder.syncCollectibleWhenIdle(bangumiId, localType);
   }
 
   Future<void> updateLocalCollect(BangumiItem bangumiItem) async {

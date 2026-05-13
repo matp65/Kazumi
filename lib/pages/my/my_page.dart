@@ -160,6 +160,16 @@ class _MyPageState extends State<MyPage> {
                   description:
                       Text('设置同步参数', style: TextStyle(fontFamily: fontFamily)),
                 ),
+                SettingsTile.navigation(
+                  onPressed: (_) {
+                    Modular.to.pushNamed('/settings/recorder/');
+                  },
+                  leading: const Icon(Icons.sync_rounded),
+                  title:
+                      Text('追番进度同步', style: TextStyle(fontFamily: fontFamily)),
+                  description: Text('配置追番进度同步服务器',
+                      style: TextStyle(fontFamily: fontFamily)),
+                ),
               ],
             ),
             SettingsSection(

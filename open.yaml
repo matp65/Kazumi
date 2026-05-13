@@ -1,0 +1,466 @@
+openapi: 3.0.0
+info:
+  title: Bangumi Recorder Open API
+  description: |
+    Public API for recording Bangumi progress using API tokens.
+    All responses use HTTP 200 with a `status` field in the response body:
+    - `0` — success
+    - `-1` — missing parameters / database error
+    - `-2` — invalid token / resource not found
+    - `-3` — already exists (new endpoint only)
+  version: 1.0.0
+servers:
+  - url: http://127.0.0.1:8080
+
+paths:
+  /api/v1/open/new:
+    post:
+      summary: Add a new recording
+      description: |
+        Create a new recording entry for a Bangumi. Requires a valid API token.
+        Returns status -3 if the recording already exists for this user.
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: API token
+        - name: bangumi_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: External Bangumi ID
+          example: 425998
+        - name: user_status
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Recording status code
+          example: 1
+      responses:
+        "200":
+          description: Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddRecordResponse"
+              examples:
+                success:
+                  summary: Success
+                  value:
+                    status: 0
+                    local_bangumi_id: null
+                    bangumi_id: 425998
+                    date: "2026-05-13"
+                alreadyExists:
+                  summary: Already exists
+                  value:
+                    status: -3
+                    local_bangumi_id: 42
+                    bangumi_id: 425998
+                    date: null
+                missingParams:
+                  summary: Missing parameters
+                  value:
+                    status: -1
+                    local_bangumi_id: null
+                    bangumi_id: null
+                    date: null
+                invalidToken:
+                  summary: Invalid token or not found
+                  value:
+                    status: -2
+                    local_bangumi_id: null
+                    bangumi_id: null
+                    date: null
+
+  /api/v1/open/update:
+    post:
+      summary: Update recorder progress
+      description: |
+        Update the recorder progress string for an existing recording.
+        The recorder format is `episode|minutes:seconds` (e.g. `5|2:12`).
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: API token
+        - name: bangumi_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: External Bangumi ID
+          example: 425998
+        - name: recorder
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Progress string in format `episode|minutes:seconds`
+          example: "5|2:12"
+      responses:
+        "200":
+          description: Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+              examples:
+                success:
+                  summary: Success
+                  value:
+                    status: 0
+                    message: Recorder updated successfully
+                missingParams:
+                  summary: Missing parameters
+                  value:
+                    status: -1
+                    message: Missing required parameters
+                invalidToken:
+                  summary: Invalid token
+                  value:
+                    status: -2
+                    message: Invalid token
+                notFound:
+                  summary: Bangumi not found
+                  value:
+                    status: -2
+                    message: Bangumi not found
+                dbError:
+                  summary: Database error
+                  value:
+                    status: -2
+                    message: Database error
+
+  /api/v1/open/get:
+    post:
+      summary: Get a specific recording
+      description: Get the recorder progress for a specific Bangumi.
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: API token
+        - name: bangumi_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: External Bangumi ID
+          example: 425998
+      responses:
+        "200":
+          description: Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetRecorderResponse"
+              examples:
+                found:
+                  summary: Recording found
+                  value:
+                    status: 0
+                    local_bangumi_id: 42
+                    bangumi_id: 425998
+                    recorder: "5|2:12"
+                    date: "2026-05-13"
+                notFound:
+                  summary: No recording exists
+                  value:
+                    status: 0
+                    local_bangumi_id: 42
+                    bangumi_id: 425998
+                    recorder: null
+                    date: null
+                error:
+                  summary: Error (invalid token / bangumi not found / DB error)
+                  value:
+                    status: -2
+                    local_bangumi_id: null
+                    bangumi_id: null
+                    recorder: null
+                    date: null
+
+  /api/v1/open/list:
+    get:
+      summary: List all recordings (basic)
+      description: Get a compact list of all recordings for the authenticated user.
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: API token
+      responses:
+        "200":
+          description: Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListRecorderResponse"
+              examples:
+                success:
+                  summary: Success
+                  value:
+                    status: 0
+                    data:
+                      - id: 1
+                        local_bangumi_id: 42
+                        bangumi_id: "425998"
+                        recorder: "5|2:12"
+                        date: "2026-05-13"
+                noToken:
+                  summary: Missing token
+                  value:
+                    status: -1
+                    data: null
+                invalidToken:
+                  summary: Invalid token
+                  value:
+                    status: -2
+                    data: null
+
+  /api/v1/open/detail_list:
+    get:
+      summary: List all recordings (detailed)
+      description: |
+        Get a detailed list of all recordings for the authenticated user,
+        including title, author, episode count, cover URL, and more.
+        **Note:** This is the only open endpoint that accepts the token in the JSON body
+        instead of as a query parameter.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenBody"
+            examples:
+              example:
+                value:
+                  token: "your-api-token"
+      responses:
+        "200":
+          description: Response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetailListResponse"
+              examples:
+                success:
+                  summary: Success
+                  value:
+                    status: 0
+                    data:
+                      - id: 1
+                        local_bangumi_id: 42
+                        bangumi_id: "425998"
+                        title: Re:Zero kara Hajimeru Isekai Seikatsu
+                        type: 1
+                        author: Nagatsuki Tappei
+                        episodes: 25
+                        cover_url: "https://example.com/cover.jpg"
+                        recorder: "5|2:12"
+                        date: "2026-05-13"
+                        created_at: "2026-05-10"
+                noToken:
+                  summary: Missing token
+                  value:
+                    status: -1
+                    data: null
+                invalidToken:
+                  summary: Invalid token
+                  value:
+                    status: -2
+                    data: null
+
+components:
+  securitySchemes:
+    apiToken:
+      type: apiKey
+      in: query
+      name: token
+      description: |
+        API token assigned to each user at registration.
+        Passed as a query parameter `?token=...` for most endpoints,
+        or in the JSON body for `/detail_list`.
+
+  schemas:
+    TokenBody:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+          description: API token
+
+    AddRecordResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          description: "0=success, -1=missing params/DB error, -2=invalid token/not found, -3=already exists"
+          enum: [0, -1, -2, -3]
+        local_bangumi_id:
+          type: integer
+          nullable: true
+          description: Internal bangumi table ID
+        bangumi_id:
+          type: integer
+          nullable: true
+          description: External Bangumi ID
+        date:
+          type: string
+          format: date
+          nullable: true
+          description: Creation date (YYYY-MM-DD)
+
+    MessageResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          description: "0=success, -1=missing params, -2=error"
+          enum: [0, -1, -2]
+        message:
+          type: string
+          nullable: true
+          description: Human-readable message
+
+    GetRecorderResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          description: "0=success/not found, -2=error"
+          enum: [0, -2]
+        local_bangumi_id:
+          type: integer
+          nullable: true
+          description: Internal bangumi table ID
+        bangumi_id:
+          type: integer
+          nullable: true
+          description: External Bangumi ID
+        recorder:
+          type: string
+          nullable: true
+          description: Progress string (e.g. `5|2:12`), null if no recording exists
+        date:
+          type: string
+          format: date
+          nullable: true
+          description: Last updated date (YYYY-MM-DD)
+
+    RecorderItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Recording entry ID
+        local_bangumi_id:
+          type: integer
+          description: Internal bangumi table ID
+        bangumi_id:
+          type: string
+          nullable: true
+          description: External Bangumi ID
+        recorder:
+          type: string
+          nullable: true
+          description: Progress string
+        date:
+          type: string
+          format: date
+          description: Last updated date (YYYY-MM-DD)
+
+    ListRecorderResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          description: "0=success, -1=missing token/DB error, -2=invalid token"
+          enum: [0, -1, -2]
+        data:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/RecorderItem"
+
+    DetailListItem:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Recording entry ID
+        local_bangumi_id:
+          type: integer
+          description: Internal bangumi table ID
+        bangumi_id:
+          type: string
+          nullable: true
+          description: External Bangumi ID
+        title:
+          type: string
+          nullable: true
+          description: Title of the Bangumi
+        type:
+          type: integer
+          nullable: true
+          description: |
+            Type code:
+            - 1: TV
+            - 2: Movie
+            - 3: OVA
+            - 4: ONA
+            - 5: TV Short
+            - 6: Music
+            - 7: Book
+            - 8: Other
+          enum: [1, 2, 3, 4, 5, 6, 7, 8]
+        author:
+          type: string
+          nullable: true
+          description: Author / original work
+        episodes:
+          type: integer
+          nullable: true
+          description: Total episode count
+        cover_url:
+          type: string
+          nullable: true
+          description: Cover image URL
+        recorder:
+          type: string
+          nullable: true
+          description: Progress string
+        date:
+          type: string
+          format: date
+          description: Last updated date (YYYY-MM-DD)
+        created_at:
+          type: string
+          format: date
+          description: Creation date (YYYY-MM-DD)
+
+    DetailListResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          description: "0=success, -1=missing token/DB error, -2=invalid token"
+          enum: [0, -1, -2]
+        data:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/DetailListItem"

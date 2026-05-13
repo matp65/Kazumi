@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/utils/bangumi_sync_service.dart';
+import 'package:kazumi/utils/recorder_sync_service.dart';
 import 'package:kazumi/utils/logger.dart';
 import 'package:kazumi/utils/storage.dart';
 import 'package:kazumi/utils/webdav.dart';
@@ -23,6 +24,7 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
   late bool webDavEnableCollect;
   late bool enableGitProxy;
   late bool bangumiSyncEnable;
+  late bool recorderSyncEnable;
 
   @override
   void initState() {
@@ -36,6 +38,8 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
         setting.get(SettingBoxKey.enableGitProxy, defaultValue: false);
     bangumiSyncEnable =
         setting.get(SettingBoxKey.bangumiSyncEnable, defaultValue: false);
+    recorderSyncEnable =
+        setting.get(SettingBoxKey.recorderSyncEnable, defaultValue: false);
   }
 
   void onBackPressed(BuildContext context) {
@@ -237,6 +241,66 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
                   title: Text('立即同步观看记录',
                       style: TextStyle(fontFamily: fontFamily)),
                   description: Text('与WEBDAV双向合并观看记录',
+                      style: TextStyle(fontFamily: fontFamily)),
+                ),
+              ],
+            ),
+            SettingsSection(
+              title: Text('追番进度记录器', style: TextStyle(fontFamily: fontFamily)),
+              tiles: [
+                SettingsTile.switchTile(
+                  onToggle: (value) async {
+                    final tRecorderEnable = value ?? !recorderSyncEnable;
+                    final recorder = RecorderSyncService();
+                    if (tRecorderEnable == true) {
+                      final url = setting
+                          .get(SettingBoxKey.recorderApiUrl,
+                              defaultValue: 'http://127.0.0.1:8080')
+                          .toString()
+                          .trim();
+                      final token = setting
+                          .get(SettingBoxKey.recorderApiToken,
+                              defaultValue: '')
+                          .toString()
+                          .trim();
+                      if (url.isEmpty || token.isEmpty) {
+                        KazumiDialog.showToast(
+                            message: '请先配置 Recorder API 地址和 Token');
+                        return;
+                      }
+                      if (!recorder.initialized) {
+                        try {
+                          await recorder.init();
+                        } catch (e) {
+                          KazumiDialog.showToast(
+                              message: 'Recorder 初始化失败，请稍后再试');
+                          return;
+                        }
+                      }
+                    }
+                    recorderSyncEnable = tRecorderEnable;
+                    await setting.put(SettingBoxKey.recorderSyncEnable,
+                        recorderSyncEnable);
+                    if (!mounted) return;
+                    setState(() {});
+                  },
+                  title: Text('Recorder 同步',
+                      style: TextStyle(fontFamily: fontFamily)),
+                  description: Text('操作追番时自动同步状态到 Recorder 服务器',
+                      style: TextStyle(fontFamily: fontFamily)),
+                  initialValue: recorderSyncEnable,
+                ),
+                SettingsTile.navigation(
+                  onPressed: (_) async {
+                    await Modular.to.pushNamed('/settings/recorder/');
+                    recorderSyncEnable = setting.get(
+                        SettingBoxKey.recorderSyncEnable,
+                        defaultValue: false);
+                    setState(() {});
+                  },
+                  title: Text('Recorder 配置',
+                      style: TextStyle(fontFamily: fontFamily)),
+                  description: Text('设置 API 地址和 Token',
                       style: TextStyle(fontFamily: fontFamily)),
                 ),
               ],
