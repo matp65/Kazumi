@@ -230,7 +230,7 @@ class RecorderApi {
       _logRequest('GET', path, {'token': '***'});
       final response = await _dio.get(
         '$_baseUrl$path',
-        data: {'token': _token},
+        queryParameters: {'token': _token},
       );
       _logResponse('GET', path, response.data);
       final data = response.data as Map<String, dynamic>;
@@ -248,6 +248,27 @@ class RecorderApi {
       _logError('GET', path, e);
     }
     return [];
+  }
+
+  Future<bool> deleteRecording(int bangumiId) async {
+    if (!hasCredentials) return false;
+    const path = '/api/v1/open/delete';
+    try {
+      _logRequest('POST', path, {'token': '***', 'bangumi_id': bangumiId});
+      final response = await _dio.post(
+        '$_baseUrl$path',
+        queryParameters: {
+          'token': _token,
+          'bangumi_id': bangumiId,
+        },
+      );
+      _logResponse('POST', path, response.data);
+      final data = response.data as Map<String, dynamic>;
+      return data['status'] == 0;
+    } on DioException catch (e) {
+      _logError('POST', path, e);
+    }
+    return false;
   }
 }
 

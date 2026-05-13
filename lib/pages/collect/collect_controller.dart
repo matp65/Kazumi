@@ -7,6 +7,7 @@ import 'package:kazumi/modules/collect/collect_module.dart';
 import 'package:kazumi/modules/collect/collect_type.dart';
 import 'package:kazumi/utils/bangumi_sync_service.dart';
 import 'package:kazumi/utils/recorder_sync_service.dart';
+import 'package:kazumi/request/apis/recorder_api.dart';
 import 'package:kazumi/utils/storage.dart';
 import 'package:kazumi/utils/webdav.dart';
 import 'package:kazumi/repositories/collect_crud_repository.dart';
@@ -114,6 +115,7 @@ abstract class _CollectController with Store {
       type: 5,
     );
     loadCollectibles();
+    _syncRecorderIfEnabled(bangumiItem.id, 0);
   }
 
   Future<_BangumiDeleteSyncAction?> _resolveBangumiDeleteSyncAction(
@@ -223,6 +225,14 @@ abstract class _CollectController with Store {
     final bool syncEnable =
         setting.get(SettingBoxKey.recorderSyncEnable, defaultValue: false);
     if (!syncEnable) return;
+
+    final api = RecorderApi();
+    if (!api.hasCredentials) return;
+
+    if (localType == 0) {
+      api.deleteRecording(bangumiId);
+      return;
+    }
 
     final recorder = RecorderSyncService();
     if (!recorder.initialized) {
