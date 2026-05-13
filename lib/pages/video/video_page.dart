@@ -5,6 +5,7 @@ import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/pages/player/player_controller.dart';
 import 'package:kazumi/pages/video/video_controller.dart';
 import 'package:kazumi/pages/history/history_controller.dart';
+import 'package:kazumi/request/apis/recorder_api.dart';
 import 'package:kazumi/utils/logger.dart';
 import 'package:kazumi/pages/player/player_item.dart';
 import 'package:flutter_mobx/flutter_mobx.dart';
@@ -176,6 +177,7 @@ class _VideoPageState extends State<VideoPage>
       }
 
       if (videoPageController.offlineVideoPath != null) {
+        await _tryResumeFromRecorder();
         final params = PlaybackInitParams(
           videoUrl: videoPageController.offlineVideoPath!,
           offset: videoPageController.historyOffset,
@@ -221,6 +223,7 @@ class _VideoPageState extends State<VideoPage>
         }
       }
     }
+
     currentRoad = videoPageController.currentRoad;
 
     _logSubscription = videoPageController.logStream.listen((log) {
@@ -234,14 +237,77 @@ class _VideoPageState extends State<VideoPage>
       }
     });
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _tryResumeFromRecorder();
       changeEpisode(videoPageController.currentEpisode,
           currentRoad: videoPageController.currentRoad,
           offset: videoPageController.historyOffset);
     });
+  }
+
+  Future<void> _tryResumeFromRecorder() async {
+    try {
+      final api = RecorderApi();
+      if (!api.hasCredentials) return;
+      final resp = await api.getRecording(videoPageController.bangumiItem.id);
+      if (resp == null || resp.recorder == null) return;
+      final parts = resp.recorder!.split('|');
+      if (parts.length != 2) return;
+      final episode = int.tryParse(parts[0]);
+      if (episode == null || episode <= 0) return;
+
+      final timeParts = parts[1].split(':');
+      if (timeParts.length != 2) return;
+      final minutes = int.tryParse(timeParts[0]);
+      final seconds = int.tryParse(timeParts[1]);
+      if (minutes == null || seconds == null) return;
+      final offsetSeconds = minutes * 60 + seconds;
+
+      final road = videoPageController.currentRoad;
+      if (videoPageController.roadList.length <= road) return;
+      if (videoPageController.roadList[road].data.length < episode) return;
+
+      final historyEpisode = videoPageController.currentEpisode;
+      final historyOffset = videoPageController.historyOffset;
+
+      if (episode > historyEpisode ||
+          (episode == historyEpisode && offsetSeconds > historyOffset)) {
+        videoPageController.currentEpisode = episode;
+        videoPageController.historyOffset = offsetSeconds;
+        KazumiLogger().i(
+          'RecorderSync: resumed from recorder episode=$episode offset=${offsetSeconds}s',
+          forceLog: true,
+        );
+      }
+    } catch (e) {
+      KazumiLogger().w('RecorderSync: resume check failed', error: e, forceLog: true);
+    }
+  }
+
+  void _syncRecorderProgressOnExit() {
+    try {
+      final api = RecorderApi();
+      if (!api.hasCredentials) return;
+      if (videoPageController.isOfflineMode) return;
+
+      final bangumiItem = videoPageController.bangumiItem;
+      final episode = videoPageController.actualEpisodeNumber;
+      final position = _playerController?.playback.playerPosition;
+      if (position == null || episode <= 0) return;
+
+      final totalMinutes = position.inMinutes;
+      final seconds = position.inSeconds % 60;
+      final recorder = '$episode|$totalMinutes:${seconds.toString().padLeft(2, '0')}';
+
+      KazumiLogger().i(
+        'RecorderSync: saving progress bangumiId=${bangumiItem.id} episode=$episode recorder=$recorder',
+        forceLog: true,
+      );
+      api.updateProgress(bangumiItem.id, recorder);
+    } catch (e) {
+      KazumiLogger().w('RecorderSync: progress sync on exit failed', error: e, forceLog: true);
+    }
   }
 
   @override
@@ -262,6 +328,7 @@ class _VideoPageState extends State<VideoPage>
       _logSubscription?.cancel();
     } catch (_) {}
     _playbackRequestId++;
+    _syncRecorderProgressOnExit();
     try {
       _playerController?.dispose();
     } catch (e) {

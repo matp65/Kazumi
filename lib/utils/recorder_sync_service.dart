@@ -9,7 +9,7 @@ class RecorderSyncService {
 
   bool _initialized = false;
 
-  bool get initialized => _initialized && RecorderApi.isConfigured;
+  bool get initialized => _initialized && RecorderApi().hasCredentials;
 
   int _queuedOperationCount = 0;
   int _activeOperationCount = 0;
@@ -19,16 +19,12 @@ class RecorderSyncService {
 
   Future<void> init() async {
     _initialized = false;
-    if (!RecorderApi.isConfigured) {
+    final api = RecorderApi();
+    if (!api.hasCredentials) {
       throw Exception('请先配置 Recorder API 地址和 Token');
     }
-    try {
-      await ping();
-      _initialized = true;
-    } catch (e) {
-      KazumiLogger().e('RecorderSync: ping failed', error: e);
-      rethrow;
-    }
+    await ping();
+    _initialized = true;
   }
 
   void reset() {
@@ -39,21 +35,40 @@ class RecorderSyncService {
     if (isUsing) {
       throw Exception('RecorderSync: 当前有操作正在进行，请稍后再试');
     }
-    await _runExclusive(() async {
-      final success = await RecorderApi.ping();
-      if (!success) {
-        throw Exception('Recorder API 连接失败，请检查地址和 Token');
-      }
-    });
+    final result = await RecorderApi().ping();
+    if (result['success'] != true) {
+      final error = result['error'] ?? '未知错误';
+      KazumiLogger().e('RecorderSync: ping failed: $error', forceLog: true);
+      throw Exception('Recorder API 连接失败: $error');
+    }
+    KazumiLogger().i('RecorderSync: ping success', forceLog: true);
   }
 
   Future<bool> syncCollectibleWhenIdle(int bangumiId, int localType) {
-    if (!RecorderApi.isConfigured) {
+    final api = RecorderApi();
+    if (!api.isConfigured) {
+      KazumiLogger().w('RecorderSync: sync skipped (not configured) bangumiId=$bangumiId', forceLog: true);
       return Future.value(true);
     }
     return _runExclusive(() async {
       final userStatus = RecorderApi.collectTypeToUserStatus(localType);
-      return RecorderApi.addRecording(bangumiId, userStatus);
+      KazumiLogger().i(
+        'RecorderSync: syncing bangumiId=$bangumiId localType=$localType userStatus=$userStatus',
+        forceLog: true,
+      );
+      final result = await api.addRecording(bangumiId, userStatus);
+      if (result) {
+        KazumiLogger().i(
+          'RecorderSync: sync success bangumiId=$bangumiId',
+          forceLog: true,
+        );
+      } else {
+        KazumiLogger().w(
+          'RecorderSync: sync FAILED bangumiId=$bangumiId userStatus=$userStatus',
+          forceLog: true,
+        );
+      }
+      return result;
     });
   }
 

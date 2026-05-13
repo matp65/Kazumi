@@ -226,17 +226,34 @@ abstract class _CollectController with Store {
 
     final recorder = RecorderSyncService();
     if (!recorder.initialized) {
-      try {
-        recorder.init().then((_) {
-          recorder.syncCollectibleWhenIdle(bangumiId, localType);
-        }).catchError((_) {});
-        return;
-      } catch (_) {
-        return;
-      }
+      _initAndSync(recorder, bangumiId, localType);
+      return;
     }
 
-    recorder.syncCollectibleWhenIdle(bangumiId, localType);
+    recorder.syncCollectibleWhenIdle(bangumiId, localType).catchError((e, st) {
+      KazumiLogger().e(
+        'RecorderSync: sync failed for bangumiId=$bangumiId',
+        error: e,
+        stackTrace: st,
+        forceLog: true,
+      );
+      return false;
+    });
+  }
+
+  Future<void> _initAndSync(
+      RecorderSyncService recorder, int bangumiId, int localType) async {
+    try {
+      await recorder.init();
+      await recorder.syncCollectibleWhenIdle(bangumiId, localType);
+    } catch (e, st) {
+      KazumiLogger().e(
+        'RecorderSync: init or sync failed for bangumiId=$bangumiId',
+        error: e,
+        stackTrace: st,
+        forceLog: true,
+      );
+    }
   }
 
   Future<void> updateLocalCollect(BangumiItem bangumiItem) async {

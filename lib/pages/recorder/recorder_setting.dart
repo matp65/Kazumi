@@ -68,11 +68,10 @@ class _RecorderSettingPageState extends State<RecorderSettingPage> {
     KazumiDialog.showToast(message: '正在测试连接...');
     try {
       await RecorderSyncService().init();
-      KazumiDialog.showToast(message: '连接成功');
+      await setting.put(SettingBoxKey.recorderSyncEnable, true);
+      KazumiDialog.showToast(message: '连接成功，已自动开启同步');
     } catch (e) {
       KazumiDialog.showToast(message: '连接失败：$e');
-      await setting.put(SettingBoxKey.recorderSyncEnable, false);
-      RecorderSyncService().reset();
     }
 
     if (!mounted) return;

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_mobx/flutter_mobx.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/modules/collect/collect_module.dart';
+import 'package:kazumi/modules/bangumi/bangumi_item.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_modular/flutter_modular.dart';
 import 'package:kazumi/utils/constants.dart';
@@ -14,6 +15,7 @@ import 'package:provider/provider.dart';
 import 'package:kazumi/bean/widget/collect_button.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:kazumi/modules/collect/collect_sync_plan.dart';
+import 'package:kazumi/request/apis/recorder_api.dart';
 import 'package:kazumi/utils/storage.dart';
 
 class CollectPage extends StatefulWidget {
@@ -120,6 +122,108 @@ class _CollectPageState extends State<CollectPage>
     return states.join('，');
   }
 
+  Future<void> _syncAllToRecorder() async {
+    final api = RecorderApi();
+    if (!api.hasCredentials) return;
+
+    // 1. Fetch remote recordings
+    final remoteList = await api.detailList();
+    final remoteMap = <int, DetailListItem>{};
+    for (final item in remoteList) {
+      final id = int.tryParse(item.bangumiId ?? '');
+      if (id != null) remoteMap[id] = item;
+    }
+
+    // 2. Build local map
+    final localMap = <int, CollectedBangumi>{};
+    for (final c in collectController.collectibles) {
+      localMap[c.bangumiItem.id] = c;
+    }
+
+    // 3. Compare each entry and decide push/pull
+    for (final entry in {...localMap.keys, ...remoteMap.keys}) {
+      final local = localMap[entry];
+      final remote = remoteMap[entry];
+
+      if (local != null && remote == null) {
+        // Local only → push to remote
+        final userStatus = RecorderApi.collectTypeToUserStatus(local.type);
+        await api.addRecording(local.bangumiItem.id, userStatus);
+      } else if (local == null && remote != null) {
+        // Remote only → pull to local (create minimal entry)
+        if (remote.title != null && remote.title!.isNotEmpty) {
+          final remoteType = RecorderApi.userStatusToCollectType(
+            _inferUserStatus(remote),
+          );
+          await collectController.addCollect(
+            _buildMinimalBangumiItem(entry, remote),
+            type: remoteType,
+          );
+        }
+      } else if (local != null && remote != null) {
+        // Both exist → compare timestamps
+        final localTime = local.time;
+        final remoteTime = remote.updatedAt != null
+            ? DateTime.tryParse(remote.updatedAt!)
+            : null;
+
+        if (remoteTime == null) {
+          // Remote has no valid timestamp → push local
+          final userStatus = RecorderApi.collectTypeToUserStatus(local.type);
+          await api.addRecording(local.bangumiItem.id, userStatus);
+        } else if (remoteTime.isAfter(localTime)) {
+          // Remote is newer → pull to local
+          final remoteType = RecorderApi.userStatusToCollectType(
+            _inferUserStatus(remote),
+          );
+          if (local.type != remoteType) {
+            local.type = remoteType;
+            await GStorage.putCollectible(local);
+            collectController.loadCollectibles();
+          }
+        } else {
+          // Local is newer or same → push to remote
+          final userStatus = RecorderApi.collectTypeToUserStatus(local.type);
+          await api.addRecording(local.bangumiItem.id, userStatus);
+        }
+      }
+    }
+  }
+
+  int _inferUserStatus(DetailListItem item) {
+    // The detail_list API doesn't directly return user_status.
+    // We infer from recorder progress: if recorder is set, likely 'recording'.
+    // If it has a title but no progress, check what addRecording set.
+    // Since the recorder field stores progress, presence indicates watching.
+    // Default to pending (0).
+    if (item.recorder != null && item.recorder!.isNotEmpty) {
+      return 1; // recording
+    }
+    return 0; // pending
+  }
+
+  BangumiItem _buildMinimalBangumiItem(int id, DetailListItem item) {
+    return BangumiItem(
+      id: id,
+      type: item.type ?? 2,
+      name: item.title ?? '',
+      nameCn: item.title ?? '',
+      summary: '',
+      airDate: '',
+      airWeekday: 0,
+      rank: 0,
+      images: item.coverUrl != null && item.coverUrl!.isNotEmpty
+          ? {'large': item.coverUrl!}
+          : {},
+      tags: [],
+      alias: [],
+      ratingScore: 0.0,
+      votes: 0,
+      votesCount: [],
+      info: '',
+    );
+  }
+
   Future<void> _runFullSync({
     required CollectSyncPlan plan,
   }) async {
@@ -162,6 +266,12 @@ class _CollectPageState extends State<CollectPage>
         webDavUploaded = await collectController.uploadCollectiblesToWebDav(
           showSuccessToast: false,
         );
+      }
+
+      if (plan.shouldSyncRecorder) {
+        progressText.value = '正在同步到 Recorder...';
+        progressValue.value = null;
+        await _syncAllToRecorder();
       }
     } finally {
       if (KazumiDialog.observer.hasKazumiDialog) {
@@ -259,10 +369,13 @@ class _CollectPageState extends State<CollectPage>
                 .get(SettingBoxKey.webDavEnableCollect, defaultValue: false);
             bool bgmSyncEnable = await setting
                 .get(SettingBoxKey.bangumiSyncEnable, defaultValue: false);
+            bool recorderSyncEnable = await setting
+                .get(SettingBoxKey.recorderSyncEnable, defaultValue: false);
             final syncPlan = CollectSyncPlan(
               webDavEnabled: webDavenable,
               webDavCollectiblesEnabled: webDavCollectEnable,
               bangumiEnabled: bgmSyncEnable,
+              recorderEnabled: recorderSyncEnable,
             );
             if (!syncPlan.canSync) {
               KazumiDialog.showToast(message: '同步功能不可用，请至少开启一个同步功能');

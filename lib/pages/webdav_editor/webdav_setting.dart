@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:kazumi/bean/dialog/dialog_helper.dart';
 import 'package:kazumi/utils/bangumi_sync_service.dart';
+import 'package:kazumi/request/apis/recorder_api.dart';
 import 'package:kazumi/utils/recorder_sync_service.dart';
 import 'package:kazumi/utils/logger.dart';
 import 'package:kazumi/utils/storage.dart';
@@ -253,17 +254,7 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
                     final tRecorderEnable = value ?? !recorderSyncEnable;
                     final recorder = RecorderSyncService();
                     if (tRecorderEnable == true) {
-                      final url = setting
-                          .get(SettingBoxKey.recorderApiUrl,
-                              defaultValue: 'http://127.0.0.1:8080')
-                          .toString()
-                          .trim();
-                      final token = setting
-                          .get(SettingBoxKey.recorderApiToken,
-                              defaultValue: '')
-                          .toString()
-                          .trim();
-                      if (url.isEmpty || token.isEmpty) {
+                      if (!RecorderApi().hasCredentials) {
                         KazumiDialog.showToast(
                             message: '请先配置 Recorder API 地址和 Token');
                         return;
@@ -273,7 +264,7 @@ class _PlayerSettingsPageState extends State<WebDavSettingsPage> {
                           await recorder.init();
                         } catch (e) {
                           KazumiDialog.showToast(
-                              message: 'Recorder 初始化失败，请稍后再试');
+                              message: 'Recorder 初始化失败: $e');
                           return;
                         }
                       }

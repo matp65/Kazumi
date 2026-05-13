@@ -5,11 +5,11 @@ import 'package:kazumi/utils/storage.dart';
 import 'package:hive_ce/hive.dart';
 
 class RecorderApi {
-  static final Dio _dio = DioFactory.apiDio;
+  Dio get _dio => DioFactory.apiDio;
 
-  static Box get _setting => GStorage.setting;
+  Box get _setting => GStorage.setting;
 
-  static String get _baseUrl {
+  String get _baseUrl {
     final url = _setting
         .get(SettingBoxKey.recorderApiUrl,
             defaultValue: 'http://127.0.0.1:8080')
@@ -18,119 +18,137 @@ class RecorderApi {
     return url.endsWith('/') ? url.substring(0, url.length - 1) : url;
   }
 
-  static String get _token {
+  String get _token {
     return _setting
         .get(SettingBoxKey.recorderApiToken, defaultValue: '')
         .toString()
         .trim();
   }
 
-  static bool get _enabled {
+  bool get _enabled {
     return _setting
         .get(SettingBoxKey.recorderSyncEnable, defaultValue: false);
   }
 
-  static bool get isConfigured => _enabled && _token.isNotEmpty && _baseUrl.isNotEmpty;
+  bool get hasCredentials => _token.isNotEmpty && _baseUrl.isNotEmpty;
 
-  static Future<RecorderGetResponse?> getRecording(int bangumiId) async {
-    if (!isConfigured) return null;
-    try {
-      final response = await _dio.post(
-        '$_baseUrl/api/v1/open/get',
-        queryParameters: {
-          'token': _token,
-          'bangumi_id': bangumiId,
-        },
-      );
-      final data = response.data as Map<String, dynamic>;
-      if (data['status'] == 0) {
-        return RecorderGetResponse.fromJson(data);
-      }
-    } on DioException catch (e) {
-      KazumiLogger().w('RecorderApi: get recording failed', error: e);
-    }
-    return null;
+  bool get isConfigured => _enabled && hasCredentials;
+
+  void _logRequest(String method, String path, Map<String, dynamic> params) {
+    KazumiLogger().i(
+      'RecorderApi: $method $path params=$params base=$_baseUrl token=${_token.isNotEmpty ? "***" : "<empty>"}',
+      forceLog: true,
+    );
   }
 
-  static Future<bool> addRecording(int bangumiId, int userStatus) async {
-    if (!isConfigured) return false;
+  void _logResponse(String method, String path, dynamic data) {
+    KazumiLogger().i(
+      'RecorderApi: $method $path response=$data',
+      forceLog: true,
+    );
+  }
+
+  void _logError(String method, String path, Object error) {
+    KazumiLogger().e(
+      'RecorderApi: $method $path FAILED error=$error base=$_baseUrl',
+      error: error,
+      forceLog: true,
+    );
+  }
+
+  Future<RecorderGetResponse?> getRecording(int bangumiId) async {
+    if (!hasCredentials) {
+      KazumiLogger().w('RecorderApi: getRecording skipped (no credentials)', forceLog: true);
+      return null;
+    }
+    const path = '/api/v1/open/get';
+    final params = {'token': _token, 'bangumi_id': bangumiId};
     try {
+      _logRequest('POST', path, params);
       final response = await _dio.post(
-        '$_baseUrl/api/v1/open/new',
-        queryParameters: {
-          'token': _token,
-          'bangumi_id': bangumiId,
-          'user_status': userStatus,
-        },
+        '$_baseUrl$path',
+        queryParameters: params,
       );
+      _logResponse('POST', path, response.data);
+      final data = response.data as Map<String, dynamic>;
+      return RecorderGetResponse.fromJson(data);
+    } on DioException catch (e) {
+      _logError('POST', path, e);
+      return null;
+    }
+  }
+
+  Future<bool> addRecording(int bangumiId, int userStatus) async {
+    if (!hasCredentials) {
+      KazumiLogger().w('RecorderApi: addRecording skipped (no credentials)', forceLog: true);
+      return false;
+    }
+    const path = '/api/v1/open/new';
+    final params = {
+      'token': _token,
+      'bangumi_id': bangumiId,
+      'user_status': userStatus,
+    };
+    try {
+      _logRequest('POST', path, params);
+      final response = await _dio.post(
+        '$_baseUrl$path',
+        queryParameters: params,
+      );
+      _logResponse('POST', path, response.data);
       final data = response.data as Map<String, dynamic>;
       if (data['status'] == 0) {
         return true;
       }
       if (data['status'] == -3) {
-        // Already exists, try update instead
-        return await updateRecording(bangumiId, userStatus);
-      }
-    } on DioException catch (e) {
-      KazumiLogger().w('RecorderApi: add recording failed', error: e);
-    }
-    return false;
-  }
-
-  static Future<bool> updateRecording(int bangumiId, int userStatus) async {
-    if (!isConfigured) return false;
-    try {
-      // Update status via new endpoint with user_status
-      final response = await _dio.post(
-        '$_baseUrl/api/v1/open/new',
-        queryParameters: {
-          'token': _token,
-          'bangumi_id': bangumiId,
-          'user_status': userStatus,
-        },
-      );
-      final data = response.data as Map<String, dynamic>;
-      if (data['status'] == 0) {
+        KazumiLogger().i('RecorderApi: recording already exists (status=-3), treating as success', forceLog: true);
         return true;
       }
-      // status -3 means already exists, which is fine for an "update"
-      if (data['status'] == -3) {
-        return true;
-      }
+      KazumiLogger().w(
+        'RecorderApi: addRecording unexpected status=${data['status']}',
+        forceLog: true,
+      );
+      return false;
     } on DioException catch (e) {
-      KazumiLogger().w('RecorderApi: update recording failed', error: e);
+      _logError('POST', path, e);
+      return false;
     }
-    return false;
   }
 
-  static Future<bool> updateProgress(int bangumiId, String recorder) async {
-    if (!isConfigured) return false;
+  Future<bool> updateProgress(int bangumiId, String recorder) async {
+    if (!hasCredentials) return false;
+    const path = '/api/v1/open/update';
+    final params = {
+      'token': _token,
+      'bangumi_id': bangumiId,
+      'recorder': recorder,
+    };
     try {
+      _logRequest('POST', path, params);
       final response = await _dio.post(
-        '$_baseUrl/api/v1/open/update',
-        queryParameters: {
-          'token': _token,
-          'bangumi_id': bangumiId,
-          'recorder': recorder,
-        },
+        '$_baseUrl$path',
+        queryParameters: params,
       );
+      _logResponse('POST', path, response.data);
       final data = response.data as Map<String, dynamic>;
       return data['status'] == 0;
     } on DioException catch (e) {
-      KazumiLogger().w('RecorderApi: update progress failed', error: e);
+      _logError('POST', path, e);
+      return false;
     }
-    return false;
   }
 
-  static Future<List<RecorderItem>> listRecordings() async {
-    if (!isConfigured) return [];
+  Future<List<RecorderItem>> listRecordings() async {
+    if (!hasCredentials) return [];
+    const path = '/api/v1/open/list';
+    final params = {'token': _token};
     try {
+      _logRequest('GET', path, params);
       final response = await _dio.get(
-        '$_baseUrl/api/v1/open/list',
-        queryParameters: {
-          'token': _token,
-        },
+        '$_baseUrl$path',
+        queryParameters: params,
       );
+      _logResponse('GET', path, response.data);
       final data = response.data as Map<String, dynamic>;
       if (data['status'] == 0 && data['data'] != null) {
         final list = data['data'] as List<dynamic>;
@@ -138,35 +156,48 @@ class RecorderApi {
             .map((e) => RecorderItem.fromJson(e as Map<String, dynamic>))
             .toList();
       }
+      KazumiLogger().w(
+        'RecorderApi: listRecordings unexpected status=${data['status']}',
+        forceLog: true,
+      );
     } on DioException catch (e) {
-      KazumiLogger().w('RecorderApi: list recordings failed', error: e);
+      _logError('GET', path, e);
     }
     return [];
   }
 
-  static Future<bool> ping() async {
-    if (!isConfigured) return false;
+  Future<Map<String, dynamic>> ping() async {
+    if (!hasCredentials) {
+      return {'success': false, 'error': '未配置 Record API 地址或 Token'};
+    }
+    const path = '/api/v1/open/list';
+    final params = {'token': _token};
     try {
+      _logRequest('GET', path, params);
       final response = await _dio.get(
-        '$_baseUrl/api/v1/open/list',
-        queryParameters: {
-          'token': _token,
-        },
+        '$_baseUrl$path',
+        queryParameters: params,
       );
+      _logResponse('GET', path, response.data);
       final data = response.data as Map<String, dynamic>;
-      return data['status'] == 0;
+      if (data['status'] == 0) {
+        return {'success': true};
+      }
+      return {
+        'success': false,
+        'error': '服务器返回错误状态码: ${data['status']}',
+        'data': data,
+      };
     } on DioException catch (e) {
-      KazumiLogger().w('RecorderApi: ping failed', error: e);
-      return false;
+      _logError('GET', path, e);
+      return {
+        'success': false,
+        'error': '网络请求失败: ${e.type} ${e.message}',
+      };
     }
   }
 
   static int collectTypeToUserStatus(int collectType) {
-    // CollectType.watching(1) → user_status 1 (recording)
-    // CollectType.planToWatch(2) → user_status 0 (pending)
-    // CollectType.onHold(3) → user_status 0 (pending)
-    // CollectType.watched(4) → user_status 2 (completed)
-    // CollectType.abandoned(5) → user_status 3 (failed)
     switch (collectType) {
       case 1:
         return 1;
@@ -177,6 +208,46 @@ class RecorderApi {
       default:
         return 0;
     }
+  }
+
+  static int userStatusToCollectType(int userStatus) {
+    switch (userStatus) {
+      case 1:
+        return 1;
+      case 2:
+        return 4;
+      case 3:
+        return 5;
+      default:
+        return 2;
+    }
+  }
+
+  Future<List<DetailListItem>> detailList() async {
+    if (!hasCredentials) return [];
+    const path = '/api/v1/open/detail_list';
+    try {
+      _logRequest('GET', path, {'token': '***'});
+      final response = await _dio.get(
+        '$_baseUrl$path',
+        data: {'token': _token},
+      );
+      _logResponse('GET', path, response.data);
+      final data = response.data as Map<String, dynamic>;
+      if (data['status'] == 0 && data['data'] != null) {
+        final list = data['data'] as List<dynamic>;
+        return list
+            .map((e) => DetailListItem.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+      KazumiLogger().w(
+        'RecorderApi: detailList unexpected status=${data['status']}',
+        forceLog: true,
+      );
+    } on DioException catch (e) {
+      _logError('GET', path, e);
+    }
+    return [];
   }
 }
 
@@ -228,6 +299,50 @@ class RecorderItem {
       bangumiId: json['bangumi_id']?.toString(),
       recorder: json['recorder'] as String?,
       date: json['date'] as String?,
+    );
+  }
+}
+
+class DetailListItem {
+  final int id;
+  final int localBangumiId;
+  final String? bangumiId;
+  final String? title;
+  final int? type;
+  final String? author;
+  final int? episodes;
+  final String? coverUrl;
+  final String? recorder;
+  final String? updatedAt;
+  final String? createdAt;
+
+  DetailListItem({
+    required this.id,
+    required this.localBangumiId,
+    this.bangumiId,
+    this.title,
+    this.type,
+    this.author,
+    this.episodes,
+    this.coverUrl,
+    this.recorder,
+    this.updatedAt,
+    this.createdAt,
+  });
+
+  factory DetailListItem.fromJson(Map<String, dynamic> json) {
+    return DetailListItem(
+      id: json['id'] as int,
+      localBangumiId: json['local_bangumi_id'] as int,
+      bangumiId: json['bangumi_id']?.toString(),
+      title: json['title'] as String?,
+      type: json['type'] as int?,
+      author: json['author'] as String?,
+      episodes: json['episodes'] as int?,
+      coverUrl: json['cover_url'] as String?,
+      recorder: json['recorder'] as String?,
+      updatedAt: json['updated_at'] as String?,
+      createdAt: json['created_at'] as String?,
     );
   }
 }
