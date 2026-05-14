@@ -261,7 +261,7 @@ class _CollectPageState extends State<CollectPage>
 
       if (plan.shouldSyncRecorder) {
         progressText.value = '正在同步到 Recorder...';
-        progressValue.value = null;
+        progressValue.value = 0;
         await _syncAllToRecorder();
       }
     } finally {
@@ -383,9 +383,15 @@ class _CollectPageState extends State<CollectPage>
               syncCollectiblesing = true;
             });
             try {
-              await _runFullSync(
-                plan: syncPlan,
-              );
+              if (syncPlan.shouldSyncRecorder &&
+                  !syncPlan.shouldSyncWebDavCollectibles &&
+                  !syncPlan.shouldSyncBangumi) {
+                // Only Recorder sync — no dialog, just a toast
+                await _syncAllToRecorder();
+                KazumiDialog.showToast(message: 'Recorder 同步完成');
+              } else {
+                await _runFullSync(plan: syncPlan);
+              }
             } finally {
               if (mounted) {
                 setState(() {
